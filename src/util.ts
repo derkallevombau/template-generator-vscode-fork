@@ -1,77 +1,93 @@
 /**
  * @File   : util.ts
- * @Author : DengSir (tdaddon@163.com)
- * @Link   : https://dengsir.github.io/
+ * @Author : DengSir (tdaddon@163.com), derkallevombau
+ * @Link   : https://dengsir.github.io/, https://github.com/derkallevombau/template-generator-vscode-fork
  */
 
 import * as path from 'path';
-import * as fs from 'mz/fs';
+import { promises as fs } from 'fs'; // mz is obsolete, at least for fs.
 
 import env from './environment';
 
-export function convert(content: string, ignore_variables?: boolean): string {
-    return content.replace(
-        /\{__(name|email|author|link|date|delete|camelCaseName|pascalCaseName|snakeCaseName|kebabCaseName|lowerDotCaseName)__\.?([^{}]*)\}/g,
-        (_, key, description) => (!ignore_variables ? env.fields[key] || '' : description),
-    );
+export function convert(content: string, ignore_variables?: boolean): string
+{
+	return content.replace(
+		/\{__(name|email|author|link|date|delete|camelCaseName|pascalCaseName|snakeCaseName|kebabCaseName|lowerDotCaseName)__\.?([^{}]*)\}/g,
+		(_, key, description) => (!ignore_variables ? env.fields[key] || '' : description),
+	);
 }
 
-export function absTemplatePath(...args: string[]): string {
-    return path.join(env.templatesFolderPath, ...args);
+export function absTemplatePath(...args: string[]): string
+{
+	return path.join(env.templatesFolderPath, ...args);
 }
 
-export function absTargetPath(...args: string[]): string {
-    return path.join(env.targetFolderPath, ...args);
+export function absTargetPath(...args: string[]): string
+{
+	return path.join(env.targetFolderPath, ...args);
 }
 
-function copyFile(src, dst) {
-    return new Promise((resolve, reject) => {
-        fs
-            .createReadStream(src)
-            .pipe(fs.createWriteStream(dst))
-            .on('close', err => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve();
-                }
-            });
-    });
+function copyFolder(src: string, dst: string)
+{
+	return fs.stat(dst)
+		.then(
+			stats => { if (!stats.isDirectory) throw Error(`Failed to copy contents of '${src}' to '${dst}': Is not a folder!`); },
+			()    => fs.mkdir(dst, { recursive: true }) // If stat fails, dst doesn't exist, so we create it.
+		).then(
+			()         => fs.readdir(src),
+			(e: Error) => { throw Error(`Failed to create dir '${dst}': ${e.message}`); }
+		).then(
+			// We need async here for this lambda to return a Promise<void> instead of void.
+			// We don't need 'files.map(...)' and 'Promise.all()' since the files are copied one by one.
+			async files => files.forEach(
+				async file =>
+				{
+					const source = path.join(src, file);
+					const target = path.join(dst, file);
+
+					if (env.debug) console.log(`Copying '${source}' to '${target}'.`);
+
+					await fs.stat(source) // We need await here for the next iteration to start when the current one has finished.
+						.then(
+							stats =>
+							{
+								if (stats.isDirectory())
+								{
+									return copyFolder(source, target)
+										.catch((e: Error) => { throw Error(`Failed to copy folder '${source}' to '${target}': ${e.message}`); });
+								}
+
+								if (stats.isFile())
+								{
+									return fs.copyFile(source, target)
+										.catch((e: Error) => { throw Error(`Failed to copy file '${source}' to '${target}': ${e.message}`); });
+								}
+							},
+							(e: Error) => { throw Error(`Failed to stat '${source}': ${e.message}`); }
+						).then(() => new Promise(resolve => setTimeout(resolve, 2000)));
+				}
+			),
+			(e: Error) => { throw Error(`Failed to read '${src}': ${e.message}`); }
+		).then(() => { if (env.debug) console.log(`Successfully copied contents of '${src}' to '${dst}'.`); });
 }
 
-async function copyFolder(src, dst) {
-    let stats = await fs.stat(dst).catch(e => undefined);
-    if (stats && !stats.isDirectory()) {
-        throw Error('not folder');
-    }
+export function checkTemplatesFolder()
+{
+	const templatesFolderPath = env.templatesFolderPath;
 
-    await fs.mkdir(dst);
-    await Promise.all(
-        (await fs.readdir(src)).map(async file => {
-            let source = path.join(src, file);
-            let target = path.join(dst, file);
-
-            let stats = await fs.stat(source);
-
-            if (stats.isDirectory()) {
-                await copyFolder(source, target);
-            } else if (stats.isFile()) {
-                await copyFile(source, target);
-            }
-        }),
-    );
+	return fs.stat(templatesFolderPath)
+		.then(
+			stats => { if (!stats.isDirectory) logAndThrow(`Templates folder '${templatesFolderPath}' is not a folder!`); },
+			// templatesFolderPath doesn't exist => Create it and copy default templates to it.
+			()    => copyFolder(path.join(env.context.extensionPath, 'templates'), templatesFolderPath)
+						.catch((e: Error) => logAndThrow(e.message))
+		);
 }
 
-export async function checkTemplatesFolder() {
-    let templatesFolderPath = env.templatesFolderPath;
-    if (!await fs.exists(templatesFolderPath)) {
-        await copyFolder(path.join(env.context.extensionPath, 'templates'), templatesFolderPath);
-        return await fs.exists(templatesFolderPath);
-    }
+function logAndThrow(message: string)
+{
+	const msg = `Template Generator: ${message}`;
 
-    let stat = await fs.stat(templatesFolderPath);
-    if (!stat.isDirectory()) {
-        return false;
-    }
-    return true;
+	console.error(msg);
+	throw Error(msg);
 }
