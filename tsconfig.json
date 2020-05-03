@@ -1,12 +1,13 @@
 {
     "compilerOptions": {
-        "module": "commonjs",
-        "target": "es6",
+        "module": "CommonJS",
+        "target": "ES2019",
+        "lib": ["ES2019"],
+		"rootDir": "src",
         "outDir": "out",
-        "lib": ["es6"],
         "sourceMap": true,
-        "rootDir": ".",
-        "experimentalDecorators": true
-    },
-    "exclude": ["node_modules", ".vscode-test", "templates"]
+		"experimentalDecorators": true,
+		"removeComments": true,
+		"pretty": true
+    }
 }
